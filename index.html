@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0f0f0f">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="VoiceCapture">
+  <title>VoiceCapture</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/dist/tabler-icons.min.css">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- Warn bar -->
+  <div id="warnBar" class="warn-bar">
+    ⚠ Web Speech API nicht verfügbar – Chrome oder Edge verwenden, oder Whisper in Einstellungen aktivieren.
+  </div>
+
+  <!-- Header -->
+  <header>
+    <div class="logo">Voice<span>Capture</span></div>
+    <div class="header-actions">
+      <button class="icon-btn" id="settingsBtn" aria-label="Einstellungen">
+        <i class="ti ti-settings" aria-hidden="true"></i>
+      </button>
+    </div>
+  </header>
+
+  <!-- Mode Selector -->
+  <div class="mode-selector">
+    <div class="mode-grid">
+      <button class="mode-btn" data-mode="direct">
+        <span class="mode-icon"><i class="ti ti-microphone" aria-hidden="true"></i></span>
+        <span class="mode-label">Direkt</span>
+        <span class="mode-desc">Eigene Stimme aufnehmen</span>
+      </button>
+      <button class="mode-btn" data-mode="call">
+        <span class="mode-icon"><i class="ti ti-phone" aria-hidden="true"></i></span>
+        <span class="mode-label">Anruf</span>
+        <span class="mode-desc">Lautsprecher → Mikrofon</span>
+      </button>
+      <button class="mode-btn" data-mode="video">
+        <span class="mode-icon"><i class="ti ti-device-tv" aria-hidden="true"></i></span>
+        <span class="mode-label">Video / Media</span>
+        <span class="mode-desc">Audio vom Gerät aufnehmen</span>
+      </button>
+      <button class="mode-btn" data-mode="upload">
+        <span class="mode-icon"><i class="ti ti-upload" aria-hidden="true"></i></span>
+        <span class="mode-label">Datei</span>
+        <span class="mode-desc">MP3, M4A, WAV hochladen</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Whisper Key Bar (shown when needed) -->
+  <div id="whisperBar" class="whisper-bar" style="padding-top:12px;">
+    <input type="password" id="whisperKeyInlineInput" placeholder="OpenAI API Key (sk-…) für Whisper" autocomplete="off">
+  </div>
+
+  <!-- Record Area -->
+  <div class="record-area">
+
+    <!-- Mic button -->
+    <div class="mic-ring">
+      <div class="mic-ring-outer" id="micRingOuter">
+        <button class="mic-btn-main" id="micBtnMain" aria-label="Aufnahme starten/stoppen">
+          <i class="ti ti-microphone" id="micIcon" aria-hidden="true"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- Upload zone (shown in upload mode) -->
+    <div class="upload-zone" id="uploadZone" role="button" tabindex="0" aria-label="Datei zum Transkribieren auswählen">
+      <input type="file" id="fileInput" accept="audio/*,video/*,.mp3,.m4a,.wav,.mp4,.webm,.ogg" style="display:none">
+      <i class="ti ti-file-music" aria-hidden="true"></i>
+      <p>Audiodatei hier ablegen oder tippen</p>
+      <small>MP3 · M4A · WAV · MP4 · OGG · WEBM</small>
+    </div>
+
+    <!-- Status & timer -->
+    <div class="record-info">
+      <div class="record-status" id="recStatus">Direkt aufnehmen</div>
+      <div class="record-timer" id="recTimer">0:00</div>
+      <div class="record-hint" id="recHint">Tippen zum Starten</div>
+    </div>
+
+    <!-- Live transcript -->
+    <div class="live-box" id="liveBox" aria-live="polite" aria-label="Live-Transkript"></div>
+
+  </div>
+
+  <!-- Transcripts Panel -->
+  <div class="panel">
+    <div class="panel-header" id="panelHeader" role="button" aria-expanded="false" aria-controls="transScroll">
+      <div class="panel-title">
+        <i class="ti ti-file-text" aria-hidden="true"></i>
+        Transkripte
+        <span class="badge" id="transBadge">0</span>
+      </div>
+      <i class="ti ti-chevron-up panel-toggle" id="panelToggle" aria-hidden="true"></i>
+    </div>
+    <div class="transcripts-scroll" id="transScroll">
+      <div id="transList"></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Settings Sheet -->
+<div class="sheet-overlay" id="sheetOverlay" role="dialog" aria-modal="true" aria-label="Einstellungen">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <h2>Einstellungen</h2>
+
+    <div class="setting-row">
+      <div>
+        <div class="setting-label">Whisper API verwenden</div>
+        <div class="setting-sub">Besser für Anrufe & laute Umgebungen</div>
+      </div>
+      <div class="toggle" id="engToggle" role="switch" aria-checked="false" tabindex="0"></div>
+    </div>
+
+    <div id="keyRow" style="display:none; padding: 4px 0 12px;">
+      <input class="sheet-input" type="password" id="whisperKeyInput"
+        placeholder="OpenAI API Key (sk-…)"
+        autocomplete="off" autocorrect="off" spellcheck="false">
+      <div style="font-size:11px; color:#555; margin-top:6px;">
+        Key wird nur lokal gespeichert · ~€0.006/Minute · <a href="https://platform.openai.com/api-keys" style="color:#7c6af7;">platform.openai.com</a>
+      </div>
+    </div>
+
+    <div class="setting-row">
+      <div>
+        <div class="setting-label">Backup exportieren</div>
+        <div class="setting-sub">Transkripte & Einstellungen als JSON</div>
+      </div>
+      <button class="t-btn send" id="exportBtn" style="font-size:12px;">Export</button>
+    </div>
+
+    <div class="setting-row">
+      <div>
+        <div class="setting-label">Backup importieren</div>
+        <div class="setting-sub">JSON-Datei wiederherstellen</div>
+      </div>
+      <input type="file" id="importInput" accept=".json" style="display:none">
+      <button class="t-btn" id="importBtn" style="font-size:12px;">Import</button>
+    </div>
+
+    <div class="setting-row">
+      <div>
+        <div class="setting-label">Alle Transkripte löschen</div>
+        <div class="setting-sub">Nicht rückgängig zu machen</div>
+      </div>
+      <button class="t-btn del" id="clearAllBtn" style="font-size:12px;">Löschen</button>
+    </div>
+
+    <div class="setting-row" style="border:none; padding-top:20px;">
+      <button onclick="closeSettings()" style="width:100%; background:#7c6af7; color:white; border:none; border-radius:12px; padding:14px; font-size:15px; font-weight:500; cursor:pointer;">
+        Fertig
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="js/app.js"></script>
+</body>
+</html>
