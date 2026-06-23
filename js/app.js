@@ -201,8 +201,15 @@ function startWebSpeech() {
   };
 
   S.recognition.onerror = e => {
-    if (e.error === 'not-allowed') showToast('Mikrofon-Zugriff verweigert');
-    stopRecording();
+    const msgs = {
+      'not-allowed': 'Mikrofon-Zugriff verweigert',
+      'no-speech': 'Keine Sprache erkannt – bitte lauter sprechen',
+      'audio-capture': 'Kein Mikrofon gefunden',
+      'network': 'Netzwerkfehler bei Spracherkennung',
+      'aborted': 'Spracherkennung abgebrochen',
+    };
+    showToast(msgs[e.error] || `Fehler: ${e.error}`);
+    if (e.error !== 'no-speech') stopRecording();
   };
 
   S.recognition.onend = () => {
