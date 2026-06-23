@@ -1,4 +1,4 @@
-const CACHE = 'voicecapture-v3';
+const CACHE = 'voicecapture-v4';
 const ASSETS = ['/', '/index.html', '/css/style.css', '/js/app.js'];
 
 self.addEventListener('install', e => {
