@@ -177,8 +177,11 @@ function stopRecording() {
     S.recognition.onend = null;
     S.recognition.stop();
     S.recognition = null;
-    if (S.interimText) S.finalText += S.interimText;
-    S.interimText = '';
+    if (S.interimText) {
+      S.finalText += S.interimText;
+      S.interimText = '';
+      el.liveBox.innerHTML = `<span class="final">${esc(S.finalText)}</span>`;
+    }
     showSaveButton('webspeech');
   }
   if (S._mediaRecorder && S._mediaRecorder.state !== 'inactive') {
