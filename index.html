@@ -11,16 +11,6 @@
   <link rel="manifest" href="manifest.json">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/dist/tabler-icons.min.css">
   <link rel="stylesheet" href="css/style.css">
-  <script>
-  if ('serviceWorker' in navigator && !sessionStorage.getItem('sw_reset_v5')) {
-    sessionStorage.setItem('sw_reset_v5', '1');
-    navigator.serviceWorker.getRegistrations().then(function(regs) {
-      var p = regs.map(function(r) { return r.unregister(); });
-      p.push(caches.keys().then(function(k) { return Promise.all(k.map(function(c) { return caches.delete(c); })); }));
-      Promise.all(p).then(function() { location.reload(); });
-    });
-  }
-  </script>
 </head>
 <body>
 
