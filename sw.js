@@ -1,5 +1,5 @@
 const CACHE = 'voicecapture-v4';
-const ASSETS = ['/', '/index.html', '/css/style.css', '/js/app.js'];
+const ASSETS = ['./', './index.html', './css/style.css', './js/app.js'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));
@@ -21,6 +21,6 @@ self.addEventListener('fetch', e => {
         caches.open(CACHE).then(c => c.put(e.request, clone));
         return res;
       })
-      .catch(() => caches.match(e.request).then(r => r || caches.match('/index.html')))
+      .catch(() => caches.match(e.request).then(r => r || caches.match('./index.html')))
   );
 });
