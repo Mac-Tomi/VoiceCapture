@@ -172,10 +172,7 @@ function stopRecording() {
   el.recTimer.style.display = 'none';
 
   if (S.recognition) {
-    S.recognition.onend = null;
     S.recognition.stop();
-    S.recognition = null;
-    showSaveButton('webspeech');
   }
   if (S._mediaRecorder && S._mediaRecorder.state !== 'inactive') {
     S._mediaRecorder.stop();
