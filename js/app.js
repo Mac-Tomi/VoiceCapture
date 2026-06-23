@@ -10,6 +10,7 @@ const S = {
   timerInterval: null,
   recognition: null,
   finalText: '',
+  interimText: '',
   transcripts: [],
   panelOpen: false,
   wsSupported: false,
@@ -137,6 +138,7 @@ function startRecording() {
   }
 
   S.finalText = '';
+  S.interimText = '';
   S.startTime = Date.now();
   S.isRecording = true;
   el.saveBtn.classList.remove('visible');
@@ -172,7 +174,12 @@ function stopRecording() {
   el.recTimer.style.display = 'none';
 
   if (S.recognition) {
+    S.recognition.onend = null;
     S.recognition.stop();
+    S.recognition = null;
+    if (S.interimText) S.finalText += S.interimText;
+    S.interimText = '';
+    showSaveButton('webspeech');
   }
   if (S._mediaRecorder && S._mediaRecorder.state !== 'inactive') {
     S._mediaRecorder.stop();
@@ -188,14 +195,14 @@ function startWebSpeech() {
   S.recognition.interimResults = true;
 
   S.recognition.onresult = e => {
-    let interim = '';
+    S.interimText = '';
     for (let i = e.resultIndex; i < e.results.length; i++) {
       if (e.results[i].isFinal) S.finalText += e.results[i][0].transcript + ' ';
-      else interim += e.results[i][0].transcript;
+      else S.interimText += e.results[i][0].transcript;
     }
     el.liveBox.innerHTML =
       (S.finalText ? `<span class="final">${esc(S.finalText)}</span>` : '') +
-      (interim ? `<span class="interim">${esc(interim)}</span>` : '');
+      (S.interimText ? `<span class="interim">${esc(S.interimText)}</span>` : '');
     el.liveBox.scrollTop = el.liveBox.scrollHeight;
   };
 
@@ -213,7 +220,6 @@ function startWebSpeech() {
 
   S.recognition.onend = () => {
     if (S.isRecording) S.recognition.start();
-    else { S.recognition = null; finalize('webspeech'); }
   };
 
   S.recognition.start();
