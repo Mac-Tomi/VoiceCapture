@@ -75,6 +75,11 @@ header { padding: 16px 20px 0; display: flex; align-items: center; justify-conte
 .live-box .final { color: var(--text); }
 .live-box .interim { color: var(--text3); font-style: italic; }
 
+/* ── Save Button ── */
+.save-btn { width: 100%; padding: 14px; background: var(--green-dim); color: var(--green); border: 1px solid rgba(76,175,120,0.4); border-radius: var(--radius-sm); font-size: 15px; font-weight: 500; cursor: pointer; display: none; align-items: center; justify-content: center; gap: 8px; transition: all 0.15s; }
+.save-btn:hover { background: var(--green); color: #fff; }
+.save-btn.visible { display: flex; }
+
 /* ── Whisper Upload (hidden input mode) ── */
 .upload-zone { width: 100%; border: 2px dashed var(--border2); border-radius: var(--radius); padding: 32px 20px; text-align: center; cursor: pointer; transition: all 0.2s; display: none; }
 .upload-zone:hover, .upload-zone.drag { border-color: var(--accent); background: var(--accent-dim); }

@@ -45,6 +45,7 @@ const el = {
   keyRow:      $('keyRow'),
   whisperKeyInput: $('whisperKeyInput'),
   whisperKeyInline: $('whisperKeyInlineInput'),
+  saveBtn:     $('saveBtn'),
   exportBtn:   $('exportBtn'),
   importBtn:   $('importBtn'),
   importInput: $('importInput'),
@@ -138,6 +139,7 @@ function startRecording() {
   S.finalText = '';
   S.startTime = Date.now();
   S.isRecording = true;
+  el.saveBtn.classList.remove('visible');
 
   el.micBtnMain.className = 'mic-btn-main recording';
   el.micIcon.className = 'ti ti-square-rounded-filled';
@@ -173,7 +175,7 @@ function stopRecording() {
     S.recognition.onend = null;
     S.recognition.stop();
     S.recognition = null;
-    finalize('webspeech');
+    showSaveButton('webspeech');
   }
   if (S._mediaRecorder && S._mediaRecorder.state !== 'inactive') {
     S._mediaRecorder.stop();
@@ -269,7 +271,7 @@ async function transcribeWhisper(blob, filename = 'recording.webm') {
       S.finalText = data.text;
       el.liveBox.style.display = 'block';
       el.liveBox.innerHTML = `<span class="final">${esc(data.text)}</span>`;
-      finalize('whisper');
+      showSaveButton('whisper');
     } else {
       showToast('Keine Sprache erkannt');
     }
@@ -296,6 +298,19 @@ function handleFileUpload(file) {
   };
   reader.readAsArrayBuffer(file);
   el.fileInput.value = '';
+}
+
+// ── Save Button ───────────────────────────────────────────────────────────
+function showSaveButton(engine) {
+  const text = S.finalText.trim();
+  if (!text) { showToast('Keine Sprache erkannt'); return; }
+  S._pendingEngine = engine;
+  el.saveBtn.classList.add('visible');
+}
+
+function manualSave() {
+  finalize(S._pendingEngine || 'webspeech');
+  el.saveBtn.classList.remove('visible');
 }
 
 // ── Finalize transcript ────────────────────────────────────────────────────
@@ -498,6 +513,7 @@ function fmtMode(m) {
 function bindEvents() {
   el.modeBtns.forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
   el.micBtnMain.addEventListener('click', toggleRecording);
+  el.saveBtn.addEventListener('click', manualSave);
   el.panelHeader.addEventListener('click', togglePanel);
   el.settingsBtn.addEventListener('click', openSettings);
   el.sheetOverlay.addEventListener('click', e => { if (e.target === el.sheetOverlay) closeSettings(); });
