@@ -1,8 +1,10 @@
 {
+  "id": "/VoiceCapture/",
   "name": "VoiceCapture",
   "short_name": "VoiceCapture",
   "description": "Sprachaufnahmen transkribieren und an Claude weitergeben",
-  "start_url": "/",
+  "start_url": "/VoiceCapture/",
+  "scope": "/VoiceCapture/",
   "display": "standalone",
   "background_color": "#0f0f0f",
   "theme_color": "#0f0f0f",
