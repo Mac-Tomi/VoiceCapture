@@ -272,7 +272,14 @@ function startMediaRecorder() {
 // ── Anruf-Aufnahme mit Gain-Boost ─────────────────────────────────────────
 async function startCallRecording() {
   try {
-    const rawStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const rawStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: false,  // Lautsprecher-Audio NICHT als Echo entfernen
+        noiseSuppression: false,  // Wir filtern selbst
+        autoGainControl: false,   // Wir regeln Gain selbst
+        sampleRate: 44100,
+      }
+    });
     S._rawStream = rawStream;
 
     const ctx = new AudioContext();
