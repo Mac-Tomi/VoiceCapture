@@ -80,6 +80,14 @@ function checkSupport() {
 }
 
 function loadSettings() {
+  // Einmaliger Key-Import via URL: ?key=sk-...
+  const urlKey = new URLSearchParams(location.search).get('key');
+  if (urlKey && urlKey.startsWith('sk-')) {
+    const s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+    s.whisperKey = urlKey;
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
+    history.replaceState(null, '', location.pathname); // Key aus URL entfernen
+  }
   try {
     const s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
     if (s.engine) S.engine = s.engine;
