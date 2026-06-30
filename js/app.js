@@ -206,6 +206,10 @@ function stopRecording() {
     S._rawStream.getTracks().forEach(t => t.stop());
     S._rawStream = null;
   }
+  if (S._systemStream) {
+    S._systemStream.getTracks().forEach(t => t.stop());
+    S._systemStream = null;
+  }
   if (S._audioCtx) {
     S._audioCtx.close().catch(() => {});
     S._audioCtx = null;
@@ -269,68 +273,91 @@ function startMediaRecorder() {
     .catch(() => { showToast('Mikrofon-Zugriff verweigert'); stopRecording(); });
 }
 
-// ── Anruf-Aufnahme mit Gain-Boost ─────────────────────────────────────────
+// ── Anruf-Aufnahme ────────────────────────────────────────────────────────
 async function startCallRecording() {
   try {
-    const rawStream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: false,  // Lautsprecher-Audio NICHT als Echo entfernen
-        noiseSuppression: false,  // Wir filtern selbst
-        autoGainControl: false,   // Wir regeln Gain selbst
-        sampleRate: 44100,
-      }
-    });
-    S._rawStream = rawStream;
-
     const ctx = new AudioContext();
     S._audioCtx = ctx;
-    const source = ctx.createMediaStreamSource(rawStream);
-
-    // Rumpeln entfernen (unter 80 Hz)
-    const highpass = ctx.createBiquadFilter();
-    highpass.type = 'highpass';
-    highpass.frequency.value = 80;
-
-    // Rauschen entfernen (über 8 kHz)
-    const lowpass = ctx.createBiquadFilter();
-    lowpass.type = 'lowpass';
-    lowpass.frequency.value = 8000;
-
-    // Sprachpräsenz boosten (+7 dB bei 2,5 kHz – Konsonanten, Deutlichkeit)
-    const presence = ctx.createBiquadFilter();
-    presence.type = 'peaking';
-    presence.frequency.value = 2500;
-    presence.gain.value = 7;
-    presence.Q.value = 0.7;
-
-    // Dynamikkompressor: laute/leise Passagen angleichen, schnelle Sprache normalisieren
-    const compressor = ctx.createDynamicsCompressor();
-    compressor.threshold.value = -24;
-    compressor.knee.value = 10;
-    compressor.ratio.value = 4;
-    compressor.attack.value = 0.003; // schneller Angriff für schnelle Sprache
-    compressor.release.value = 0.25;
-
-    // Make-up-Gain nach Kompression
-    const gain = ctx.createGain();
-    gain.gain.value = 4.0;
-
     const dest = ctx.createMediaStreamDestination();
-    source.connect(highpass);
-    highpass.connect(lowpass);
-    lowpass.connect(presence);
-    presence.connect(compressor);
-    compressor.connect(gain);
-    gain.connect(dest);
-    S._boostedStream = dest.stream;
 
+    // Desktop: System-Audio direkt abgreifen (YouTube, Medien, Anrufe über PC)
+    const isDesktop = !/iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    if (isDesktop && navigator.mediaDevices.getDisplayMedia) {
+      try {
+        el.recStatus.textContent = 'Audio-Quelle auswählen…';
+        const sysStream = await navigator.mediaDevices.getDisplayMedia({
+          audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+          video: { width: 1, height: 1 },
+        });
+        sysStream.getVideoTracks().forEach(t => t.stop());
+        S._systemStream = sysStream;
+        if (sysStream.getAudioTracks().length > 0) {
+          const sysSource = ctx.createMediaStreamSource(sysStream);
+          const sysGain = ctx.createGain();
+          sysGain.gain.value = 2.0;
+          sysSource.connect(sysGain);
+          sysGain.connect(dest);
+        }
+      } catch(e) {
+        // Nutzer hat abgebrochen – weiter mit Mikrofon
+      }
+    }
+
+    // Mikrofon: eigene Stimme + akustisches Umgebungsaudio (inkl. Lautsprecher)
+    const micStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+        suppressLocalAudioPlayback: false,
+      }
+    });
+    S._rawStream = micStream;
+    buildMicChain(ctx, micStream, dest);
+
+    S._boostedStream = dest.stream;
     S._callTranscript = '';
     S._callChunkNum = 0;
+    el.recStatus.textContent = 'Aufnahme läuft…';
     startCallChunk();
   } catch(e) {
     showToast('Mikrofon-Zugriff verweigert');
     stopRecording();
   }
+}
+
+function buildMicChain(ctx, stream, dest) {
+  const source = ctx.createMediaStreamSource(stream);
+
+  // Rumpeln unter 80 Hz entfernen
+  const highpass = ctx.createBiquadFilter();
+  highpass.type = 'highpass';
+  highpass.frequency.value = 80;
+
+  // Sprachpräsenz boosten (+7 dB bei 2,5 kHz)
+  const presence = ctx.createBiquadFilter();
+  presence.type = 'peaking';
+  presence.frequency.value = 2500;
+  presence.gain.value = 7;
+  presence.Q.value = 0.7;
+
+  // Kompressor: laute/leise Passagen und schnelle Sprache angleichen
+  const compressor = ctx.createDynamicsCompressor();
+  compressor.threshold.value = -30;
+  compressor.knee.value = 12;
+  compressor.ratio.value = 3;
+  compressor.attack.value = 0.002;
+  compressor.release.value = 0.2;
+
+  // Make-up-Gain
+  const gain = ctx.createGain();
+  gain.gain.value = 5.0;
+
+  source.connect(highpass);
+  highpass.connect(presence);
+  presence.connect(compressor);
+  compressor.connect(gain);
+  gain.connect(dest);
 }
 
 function startCallChunk() {
