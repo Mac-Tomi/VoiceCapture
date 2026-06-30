@@ -97,13 +97,22 @@ header { padding: 16px 20px 0; display: flex; align-items: center; justify-conte
 .panel { flex-shrink: 0; background: var(--surface); border-top: 1px solid var(--border); max-height: 42vh; display: flex; flex-direction: column; }
 .panel-header { padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); flex-shrink: 0; cursor: pointer; }
 .panel-title { font-size: 13px; font-weight: 500; color: var(--text2); display: flex; align-items: center; gap: 8px; }
+.panel-right { display: flex; align-items: center; gap: 8px; }
+.panel-actions { display: none; gap: 6px; }
+.panel-actions.visible { display: flex; }
 .badge { background: var(--accent-dim); color: var(--accent); font-size: 11px; padding: 2px 7px; border-radius: 999px; font-weight: 600; }
 .panel-toggle { font-size: 14px; color: var(--text3); transition: transform 0.2s; }
 .panel-toggle.open { transform: rotate(180deg); }
+.select-bar { display: none; padding: 8px 14px; background: var(--surface2); border-bottom: 1px solid var(--border); align-items: center; justify-content: space-between; font-size: 12px; color: var(--text2); flex-shrink: 0; }
+.select-bar.visible { display: flex; }
 .transcripts-scroll { overflow-y: auto; flex: 1; padding: 8px 12px 12px; display: none; }
 .transcripts-scroll.open { display: block; }
 
-.t-card { background: var(--surface2); border-radius: var(--radius-sm); padding: 12px 14px; margin-bottom: 8px; }
+.t-card { background: var(--surface2); border-radius: var(--radius-sm); padding: 12px 14px; margin-bottom: 8px; border: 1px solid transparent; }
+.t-card.selectable { cursor: pointer; }
+.t-card.selected { border-color: var(--accent); background: var(--accent-dim); }
+.t-select-cb { width: 22px; height: 22px; border: 2px solid var(--border2); border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 13px; color: var(--accent); margin-bottom: 8px; transition: all 0.15s; }
+.t-card.selected .t-select-cb { background: var(--accent); border-color: var(--accent); color: white; }
 .t-title { font-size: 14px; font-weight: 600; color: var(--accent); margin-bottom: 4px; }
 .t-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
 .t-date { font-size: 11px; color: var(--text3); }

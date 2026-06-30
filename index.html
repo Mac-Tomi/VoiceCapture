@@ -105,7 +105,20 @@
         Transkripte
         <span class="badge" id="transBadge">0</span>
       </div>
-      <i class="ti ti-chevron-up panel-toggle" id="panelToggle" aria-hidden="true"></i>
+      <div class="panel-right">
+        <div class="panel-actions" id="panelActions">
+          <button class="t-btn" onclick="event.stopPropagation();copyAllTranscripts()" title="Alle Transkripte kopieren">⎘ Alle</button>
+          <button class="t-btn" id="selectModeBtn" onclick="event.stopPropagation();toggleSelectMode()" title="Mehrere auswählen">☐</button>
+        </div>
+        <i class="ti ti-chevron-up panel-toggle" id="panelToggle" aria-hidden="true"></i>
+      </div>
+    </div>
+    <div class="select-bar" id="selectBar">
+      <span id="selectCount">0 ausgewählt</span>
+      <div style="display:flex;gap:6px;">
+        <button class="t-btn send" onclick="mergeSelected()">Zusammenführen</button>
+        <button class="t-btn" onclick="toggleSelectMode()">✕ Abbrechen</button>
+      </div>
     </div>
     <div class="transcripts-scroll" id="transScroll">
       <div id="transList"></div>

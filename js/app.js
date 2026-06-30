@@ -14,10 +14,13 @@ const S = {
   transcripts: [],
   panelOpen: false,
   wsSupported: false,
+  selectMode: false,
+  selectedIds: new Set(),
 };
 
 const STORAGE_KEY = 'vc_transcripts_v2';
 const SETTINGS_KEY = 'vc_settings_v1';
+const CALL_CHUNK_MS = 180_000; // 3-Minuten-Abschnitte – mehr Kontext für Whisper
 
 // ── DOM refs ───────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
@@ -51,6 +54,9 @@ const el = {
   importBtn:   $('importBtn'),
   importInput: $('importInput'),
   clearAllBtn: $('clearAllBtn'),
+  panelActions: $('panelActions'),
+  selectBar:   $('selectBar'),
+  selectCount: $('selectCount'),
 };
 
 // ── Init ───────────────────────────────────────────────────────────────────
@@ -98,7 +104,7 @@ function saveTranscriptsStore() {
 // ── Mode ───────────────────────────────────────────────────────────────────
 const MODE_META = {
   direct: { icon: 'ti-microphone',     status: 'Direkt aufnehmen',       hint: 'Tippen zum Starten' },
-  call:   { icon: 'ti-phone',          status: 'Anruf mithören',          hint: 'Anruf auf Lautsprecher stellen, dann aufnehmen' },
+  call:   { icon: 'ti-phone',          status: 'Anruf mithören',          hint: 'Anruf auf Lautsprecher → Mikrofon wird verstärkt (Whisper empfohlen)' },
   video:  { icon: 'ti-device-tv',      status: 'Video/Audio aufnehmen',   hint: 'Gerät auf Lautsprecher – Mikrofon hört mit' },
   upload: { icon: 'ti-upload',         status: 'Datei transkribieren',    hint: 'MP3, M4A, WAV, MP4 – benötigt Whisper API Key' },
 };
@@ -156,9 +162,14 @@ function startRecording() {
     el.recTimer.textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
   }, 500);
 
-  if (S.engine === 'whisper') {
+  if (S.mode === 'call' && S.whisperKey.trim()) {
+    startCallRecording();
+  } else if (S.engine === 'whisper') {
     startMediaRecorder();
   } else {
+    if (S.mode === 'call') {
+      showToast('Tipp: Mit Whisper API Key wird der Anrufer besser erfasst');
+    }
     startWebSpeech();
   }
 }
@@ -166,6 +177,7 @@ function startRecording() {
 function stopRecording() {
   S.isRecording = false;
   clearInterval(S.timerInterval);
+  clearTimeout(S._callChunkTimer);
 
   el.micBtnMain.className = 'mic-btn-main ready';
   el.micIcon.className = `ti ${MODE_META[S.mode].icon}`;
@@ -186,6 +198,17 @@ function stopRecording() {
   }
   if (S._mediaRecorder && S._mediaRecorder.state !== 'inactive') {
     S._mediaRecorder.stop();
+    // Für Anruf-Modus: save button wird nach finaler Chunk-Transkription gezeigt
+  }
+
+  // Anruf-Aufnahme-Ressourcen freigeben
+  if (S._rawStream) {
+    S._rawStream.getTracks().forEach(t => t.stop());
+    S._rawStream = null;
+  }
+  if (S._audioCtx) {
+    S._audioCtx.close().catch(() => {});
+    S._audioCtx = null;
   }
 }
 
@@ -244,6 +267,134 @@ function startMediaRecorder() {
       S._mediaRecorder.start(1000);
     })
     .catch(() => { showToast('Mikrofon-Zugriff verweigert'); stopRecording(); });
+}
+
+// ── Anruf-Aufnahme mit Gain-Boost ─────────────────────────────────────────
+async function startCallRecording() {
+  try {
+    const rawStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    S._rawStream = rawStream;
+
+    const ctx = new AudioContext();
+    S._audioCtx = ctx;
+    const source = ctx.createMediaStreamSource(rawStream);
+
+    // Rumpeln entfernen (unter 80 Hz)
+    const highpass = ctx.createBiquadFilter();
+    highpass.type = 'highpass';
+    highpass.frequency.value = 80;
+
+    // Rauschen entfernen (über 8 kHz)
+    const lowpass = ctx.createBiquadFilter();
+    lowpass.type = 'lowpass';
+    lowpass.frequency.value = 8000;
+
+    // Sprachpräsenz boosten (+7 dB bei 2,5 kHz – Konsonanten, Deutlichkeit)
+    const presence = ctx.createBiquadFilter();
+    presence.type = 'peaking';
+    presence.frequency.value = 2500;
+    presence.gain.value = 7;
+    presence.Q.value = 0.7;
+
+    // Dynamikkompressor: laute/leise Passagen angleichen, schnelle Sprache normalisieren
+    const compressor = ctx.createDynamicsCompressor();
+    compressor.threshold.value = -24;
+    compressor.knee.value = 10;
+    compressor.ratio.value = 4;
+    compressor.attack.value = 0.003; // schneller Angriff für schnelle Sprache
+    compressor.release.value = 0.25;
+
+    // Make-up-Gain nach Kompression
+    const gain = ctx.createGain();
+    gain.gain.value = 4.0;
+
+    const dest = ctx.createMediaStreamDestination();
+    source.connect(highpass);
+    highpass.connect(lowpass);
+    lowpass.connect(presence);
+    presence.connect(compressor);
+    compressor.connect(gain);
+    gain.connect(dest);
+    S._boostedStream = dest.stream;
+
+    S._callTranscript = '';
+    S._callChunkNum = 0;
+    startCallChunk();
+  } catch(e) {
+    showToast('Mikrofon-Zugriff verweigert');
+    stopRecording();
+  }
+}
+
+function startCallChunk() {
+  if (!S.isRecording) return;
+
+  S._callChunkNum++;
+  const chunkNum = S._callChunkNum;
+  const chunks = [];
+
+  const recorder = new MediaRecorder(S._boostedStream, { mimeType: getSupportedMime() });
+  S._mediaRecorder = recorder;
+
+  recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+
+  recorder.onstop = async () => {
+    if (!chunks.length) return;
+    const blob = new Blob(chunks, { type: recorder.mimeType });
+    await transcribeCallChunk(blob, chunkNum, !S.isRecording);
+  };
+
+  recorder.start(1000);
+
+  S._callChunkTimer = setTimeout(() => {
+    if (recorder.state !== 'inactive') recorder.stop();
+    startCallChunk();
+  }, CALL_CHUNK_MS);
+}
+
+async function transcribeCallChunk(blob, chunkNum, isFinal = false) {
+  const key = S.whisperKey.trim();
+  if (!key) return;
+
+  if (isFinal) {
+    el.recStatus.textContent = 'Letzter Abschnitt wird transkribiert…';
+  } else if (S.isRecording) {
+    el.recStatus.textContent = `Abschnitt ${chunkNum} wird transkribiert…`;
+  }
+
+  const form = new FormData();
+  form.append('file', blob, `chunk${chunkNum}.webm`);
+  form.append('model', 'whisper-1');
+  form.append('language', 'de');
+  form.append('prompt', 'Telefonat auf Lautsprecher. Umgangssprache, Dialekt und schnelle Sprache möglich. Wörter vollständig transkribieren.');
+
+  try {
+    const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}` },
+      body: form,
+    });
+    const data = await res.json();
+    if (data.text && data.text.trim()) {
+      S._callTranscript = (S._callTranscript ? S._callTranscript + ' ' : '') + data.text.trim();
+      S.finalText = S._callTranscript;
+      el.liveBox.style.display = 'block';
+      el.liveBox.innerHTML = `<span class="final">${esc(S._callTranscript)}</span>`;
+      el.liveBox.scrollTop = el.liveBox.scrollHeight;
+    }
+  } catch(e) {
+    // Netzwerkfehler nicht anzeigen – Aufnahme läuft weiter
+  } finally {
+    if (S.isRecording) {
+      el.recStatus.textContent = 'Aufnahme läuft…';
+    } else if (isFinal) {
+      el.recStatus.textContent = MODE_META[S.mode].status;
+    }
+  }
+
+  if (isFinal && S.finalText.trim()) {
+    showSaveButton('whisper');
+  }
 }
 
 function getSupportedMime() {
@@ -344,29 +495,36 @@ function finalize(engine) {
 // ── Render ─────────────────────────────────────────────────────────────────
 function renderTranscripts() {
   el.transBadge.textContent = S.transcripts.length;
+  el.panelActions.classList.toggle('visible', S.panelOpen && S.transcripts.length > 0 && !S.selectMode);
+
   if (!S.transcripts.length) {
     el.transList.innerHTML = '<div class="empty-trans">Noch keine Aufnahmen</div>';
     return;
   }
 
-  el.transList.innerHTML = S.transcripts.map(t => `
-    <div class="t-card" id="tc-${t.id}">
-      ${t.title ? `<div class="t-title">${esc(t.title)}</div>` : ''}
-      <div class="t-meta">
-        <span class="t-date">${fmtDate(t.date)}</span>
-        <span class="t-dur">${fmtDur(t.duration)}</span>
-        <span class="t-mode ${t.engine}">${t.engine === 'whisper' ? 'Whisper' : 'Live'} · ${fmtMode(t.mode)}</span>
+  el.transList.innerHTML = S.transcripts.map(t => {
+    const sel = S.selectedIds.has(t.id);
+    return `
+      <div class="t-card${S.selectMode ? ' selectable' : ''}${sel ? ' selected' : ''}" id="tc-${t.id}"
+           ${S.selectMode ? `onclick="toggleCardSelect(${t.id})"` : ''}>
+        ${S.selectMode ? `<div class="t-select-cb">${sel ? '✓' : ''}</div>` : ''}
+        ${t.title ? `<div class="t-title">${esc(t.title)}</div>` : ''}
+        <div class="t-meta">
+          <span class="t-date">${fmtDate(t.date)}</span>
+          <span class="t-dur">${fmtDur(t.duration)}</span>
+          <span class="t-mode ${t.engine}">${t.engine === 'whisper' ? 'Whisper' : 'Live'} · ${fmtMode(t.mode)}</span>
+        </div>
+        <div class="t-text ${t.expanded ? 'expanded' : ''}" id="tt-${t.id}">${esc(t.text)}</div>
+        ${!S.selectMode ? `<div class="t-actions">
+          <button class="t-btn send" onclick="copyAndSend(${t.id})">↗ An Claude</button>
+          <button class="t-btn" onclick="copyOnly(${t.id})">⎘ Kopieren</button>
+          <button class="t-btn" onclick="renameT(${t.id})">✎ Umbenennen</button>
+          <button class="t-btn" onclick="toggleExpand(${t.id})">${t.expanded ? '▲ Weniger' : '▼ Mehr'}</button>
+          <button class="t-btn del" onclick="deleteT(${t.id})">✕</button>
+        </div>` : ''}
       </div>
-      <div class="t-text ${t.expanded ? 'expanded' : ''}" id="tt-${t.id}">${esc(t.text)}</div>
-      <div class="t-actions">
-        <button class="t-btn send" onclick="copyAndSend(${t.id})">↗ An Claude</button>
-        <button class="t-btn" onclick="copyOnly(${t.id})">⎘ Kopieren</button>
-        <button class="t-btn" onclick="renameT(${t.id})">✎ Umbenennen</button>
-        <button class="t-btn" onclick="toggleExpand(${t.id})">${t.expanded ? '▲ Weniger' : '▼ Mehr'}</button>
-        <button class="t-btn del" onclick="deleteT(${t.id})">✕</button>
-      </div>
-    </div>
-  `).join('');
+    `;
+  }).join('');
 }
 
 // ── Actions ────────────────────────────────────────────────────────────────
@@ -425,6 +583,71 @@ function togglePanel() {
   S.panelOpen = !S.panelOpen;
   el.transScroll.classList.toggle('open', S.panelOpen);
   el.panelToggle.classList.toggle('open', S.panelOpen);
+  if (!S.panelOpen && S.selectMode) {
+    S.selectMode = false;
+    S.selectedIds.clear();
+    el.selectBar.classList.remove('visible');
+  }
+  el.panelActions.classList.toggle('visible', S.panelOpen && S.transcripts.length > 0 && !S.selectMode);
+}
+
+// ── Auswählen & Zusammenführen ─────────────────────────────────────────────
+function toggleSelectMode() {
+  S.selectMode = !S.selectMode;
+  S.selectedIds.clear();
+  el.selectBar.classList.toggle('visible', S.selectMode);
+  el.selectCount.textContent = '0 ausgewählt';
+  el.panelActions.classList.toggle('visible', !S.selectMode && S.panelOpen && S.transcripts.length > 0);
+  renderTranscripts();
+}
+
+function toggleCardSelect(id) {
+  if (S.selectedIds.has(id)) S.selectedIds.delete(id);
+  else S.selectedIds.add(id);
+  el.selectCount.textContent = S.selectedIds.size + ' ausgewählt';
+  const card = $('tc-' + id);
+  const sel = S.selectedIds.has(id);
+  card.classList.toggle('selected', sel);
+  const cb = card.querySelector('.t-select-cb');
+  if (cb) cb.textContent = sel ? '✓' : '';
+}
+
+function mergeSelected() {
+  if (S.selectedIds.size < 2) { showToast('Mindestens 2 Einträge auswählen'); return; }
+  const selected = S.transcripts
+    .filter(t => S.selectedIds.has(t.id))
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  const merged = {
+    id: Date.now(),
+    title: selected[0].title || '',
+    text: selected.map(t => t.text).join('\n\n'),
+    date: new Date().toISOString(),
+    duration: selected.reduce((sum, t) => sum + (t.duration || 0), 0),
+    mode: selected[0].mode,
+    engine: selected[0].engine,
+    expanded: false,
+  };
+
+  S.transcripts = S.transcripts.filter(t => !S.selectedIds.has(t.id));
+  S.transcripts.unshift(merged);
+  S.selectedIds.clear();
+  S.selectMode = false;
+  el.selectBar.classList.remove('visible');
+  saveTranscriptsStore();
+  renderTranscripts();
+  showToast(selected.length + ' Transkripte zusammengeführt');
+}
+
+function copyAllTranscripts() {
+  if (!S.transcripts.length) { showToast('Keine Transkripte vorhanden'); return; }
+  const text = [...S.transcripts]
+    .reverse()
+    .map(t => `[${fmtDate(t.date)} · ${fmtMode(t.mode)}]\n${t.text}`)
+    .join('\n\n---\n\n');
+  navigator.clipboard.writeText(text)
+    .then(() => showToast('Alle ' + S.transcripts.length + ' Transkripte kopiert'))
+    .catch(() => { fallbackCopy(text); showToast('Alle kopiert'); });
 }
 
 // ── Settings Sheet ─────────────────────────────────────────────────────────
