@@ -20,7 +20,7 @@ const S = {
 
 const STORAGE_KEY = 'vc_transcripts_v2';
 const SETTINGS_KEY = 'vc_settings_v1';
-const CALL_CHUNK_MS = 180_000; // 3-Minuten-Abschnitte – mehr Kontext für Whisper
+const CALL_CHUNK_MS = 60_000; // 60-Sekunden-Abschnitte für schnelles Feedback
 
 // ── DOM refs ───────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
@@ -171,12 +171,13 @@ function startRecording() {
   }, 500);
 
   if (S.mode === 'call' && S.whisperKey.trim()) {
+    showToast('Whisper aktiv – Chunk alle 60s');
     startCallRecording();
   } else if (S.engine === 'whisper') {
     startMediaRecorder();
   } else {
     if (S.mode === 'call') {
-      showToast('Tipp: Mit Whisper API Key wird der Anrufer besser erfasst');
+      showToast('⚠ Kein API-Key – nur deine Stimme wird erkannt');
     }
     startWebSpeech();
   }
