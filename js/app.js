@@ -2,8 +2,7 @@
 
 // ── State ──────────────────────────────────────────────────────────────────
 const S = {
-  mode: 'direct',        // direct | call | video | upload
-  engine: 'webspeech',   // webspeech | whisper
+  mode: 'direct',        // direct | upload
   whisperKey: '',
   isRecording: false,
   startTime: null,
@@ -45,11 +44,8 @@ const el = {
   toast:       $('toast'),
   settingsBtn: $('settingsBtn'),
   sheetOverlay: $('sheetOverlay'),
-  engToggle:   $('engToggle'),
-  keyRow:      $('keyRow'),
   whisperKeyInput: $('whisperKeyInput'),
   whisperKeyInline: $('whisperKeyInlineInput'),
-  saveBtn:     $('saveBtn'),
   exportBtn:   $('exportBtn'),
   importBtn:   $('importBtn'),
   importInput: $('importInput'),
@@ -74,7 +70,7 @@ function init() {
 
 function checkSupport() {
   S.wsSupported = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
-  if (!S.wsSupported && S.engine === 'webspeech') {
+  if (!S.wsSupported && !S.whisperKey.trim()) {
     el.warnBar.style.display = 'block';
   }
 }
@@ -90,13 +86,12 @@ function loadSettings() {
   }
   try {
     const s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
-    if (s.engine) S.engine = s.engine;
     if (s.whisperKey) S.whisperKey = s.whisperKey;
   } catch(e) {}
 }
 
 function saveSettings() {
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify({ engine: S.engine, whisperKey: S.whisperKey }));
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify({ whisperKey: S.whisperKey }));
 }
 
 function loadTranscripts() {
@@ -111,10 +106,8 @@ function saveTranscriptsStore() {
 
 // ── Mode ───────────────────────────────────────────────────────────────────
 const MODE_META = {
-  direct: { icon: 'ti-microphone',     status: 'Direkt aufnehmen',       hint: 'Tippen zum Starten' },
-  call:   { icon: 'ti-phone',          status: 'Anruf mithören',          hint: 'Anruf auf Lautsprecher → Mikrofon wird verstärkt (Whisper empfohlen)' },
-  video:  { icon: 'ti-device-tv',      status: 'Video/Audio aufnehmen',   hint: 'Gerät auf Lautsprecher – Mikrofon hört mit' },
-  upload: { icon: 'ti-upload',         status: 'Datei transkribieren',    hint: 'MP3, M4A, WAV, MP4 – benötigt Whisper API Key' },
+  direct: { icon: 'ti-microphone', status: 'Direkt aufnehmen', hint: 'Tippen zum Starten – mit Whisper-Key auch für Telefon/Gespräch geeignet, beliebig lang' },
+  upload: { icon: 'ti-upload',     status: 'Datei transkribieren', hint: 'MP3, M4A, WAV, MP4 – benötigt Whisper API Key' },
 };
 
 function setMode(mode) {
@@ -133,7 +126,7 @@ function setMode(mode) {
   el.recTimer.style.display = 'none';
   el.liveBox.style.display = 'none';
 
-  el.whisperBar.style.display = (isUpload || S.engine === 'whisper') ? 'flex' : 'none';
+  el.whisperBar.style.display = (isUpload || !S.whisperKey.trim()) ? 'flex' : 'none';
 }
 
 // ── Recording ──────────────────────────────────────────────────────────────
@@ -146,8 +139,8 @@ function toggleRecording() {
 }
 
 function startRecording() {
-  if (!S.wsSupported && S.engine === 'webspeech') {
-    showToast('Web Speech nicht verfügbar – bitte Chrome/Edge verwenden');
+  if (!S.wsSupported && !S.whisperKey.trim()) {
+    showToast('Web Speech nicht verfügbar – bitte Chrome/Edge verwenden oder Whisper API Key eintragen');
     return;
   }
 
@@ -155,7 +148,6 @@ function startRecording() {
   S.interimText = '';
   S.startTime = Date.now();
   S.isRecording = true;
-  el.saveBtn.classList.remove('visible');
 
   el.micBtnMain.className = 'mic-btn-main recording';
   el.micIcon.className = 'ti ti-square-rounded-filled';
@@ -170,14 +162,12 @@ function startRecording() {
     el.recTimer.textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
   }, 500);
 
-  if (S.mode === 'call' && S.whisperKey.trim()) {
-    showToast('Whisper aktiv – Chunk alle 60s');
+  if (S.mode === 'direct' && S.whisperKey.trim()) {
+    showToast('Whisper aktiv – läuft in 60s-Abschnitten, beliebig lange Aufnahme möglich');
     startCallRecording();
-  } else if (S.engine === 'whisper') {
-    startMediaRecorder();
   } else {
-    if (S.mode === 'call') {
-      showToast('⚠ Kein API-Key – nur deine Stimme wird erkannt');
+    if (S.mode === 'direct') {
+      showToast('⚠ Kein API-Key – nur deine eigene Stimme wird live erkannt (Browser-Spracherkennung)');
     }
     startWebSpeech();
   }
@@ -195,29 +185,29 @@ function stopRecording() {
   el.recTimer.style.display = 'none';
 
   if (S.recognition) {
-    S.recognition.onend = null;
-    S.recognition.stop();
-    S.recognition = null;
-    if (S.interimText) {
-      S.finalText += S.interimText;
-      S.interimText = '';
-      el.liveBox.innerHTML = `<span class="final">${esc(S.finalText)}</span>`;
-    }
-    showSaveButton('webspeech');
+    const rec = S.recognition;
+    S.recognition = null; // verhindert Neustart in onend
+    rec.onerror = null;
+    // finalize() erst in onend: feuert NACH dem letzten onresult-Event des Browsers
+    rec.onend = () => {
+      rec.onend = null;
+      if (S.interimText) {
+        S.finalText += S.interimText;
+        S.interimText = '';
+        el.liveBox.innerHTML = `<span class="final">${esc(S.finalText)}</span>`;
+      }
+      finalize('webspeech');
+    };
+    rec.stop();
   }
   if (S._mediaRecorder && S._mediaRecorder.state !== 'inactive') {
     S._mediaRecorder.stop();
-    // Für Anruf-Modus: save button wird nach finaler Chunk-Transkription gezeigt
   }
 
-  // Anruf-Aufnahme-Ressourcen freigeben
+  // Aufnahme-Ressourcen freigeben
   if (S._rawStream) {
     S._rawStream.getTracks().forEach(t => t.stop());
     S._rawStream = null;
-  }
-  if (S._systemStream) {
-    S._systemStream.getTracks().forEach(t => t.stop());
-    S._systemStream = null;
   }
   if (S._audioCtx) {
     S._audioCtx.close().catch(() => {});
@@ -246,73 +236,40 @@ function startWebSpeech() {
   };
 
   S.recognition.onerror = e => {
-    const msgs = {
-      'not-allowed': 'Mikrofon-Zugriff verweigert',
-      'no-speech': 'Keine Sprache erkannt – bitte lauter sprechen',
-      'audio-capture': 'Kein Mikrofon gefunden',
-      'network': 'Netzwerkfehler bei Spracherkennung',
-      'aborted': 'Spracherkennung abgebrochen',
-    };
-    showToast(msgs[e.error] || `Fehler: ${e.error}`);
-    if (e.error !== 'no-speech') stopRecording();
+    // Nur fatale Fehler stoppen die Aufnahme.
+    // 'aborted' ist transient (Browser zu schneller Neustart) → onend übernimmt Restart.
+    // 'no-speech' ist kein Fehler → weiter lauschen.
+    if (e.error === 'not-allowed') { showToast('Mikrofon-Zugriff verweigert'); stopRecording(); }
+    else if (e.error === 'audio-capture') { showToast('Kein Mikrofon gefunden'); stopRecording(); }
+    else if (e.error === 'network') showToast('Netzwerkfehler – Aufnahme läuft weiter');
+    // 'aborted', 'no-speech', sonstige: still ignorieren, onend startet neu
   };
 
+  // 150 ms Pause vor Neustart verhindert 'aborted'-Schleifen bei Chrome
   S.recognition.onend = () => {
-    if (S.isRecording) S.recognition.start();
+    if (!S.isRecording) return;
+    setTimeout(() => {
+      if (S.isRecording && S.recognition) {
+        try { S.recognition.start(); } catch (_) {}
+      }
+    }, 150);
   };
 
   S.recognition.start();
 }
 
-// ── MediaRecorder → Whisper ────────────────────────────────────────────────
-function startMediaRecorder() {
-  navigator.mediaDevices.getUserMedia({ audio: true })
-    .then(stream => {
-      const chunks = [];
-      S._stream = stream;
-      S._mediaRecorder = new MediaRecorder(stream, { mimeType: getSupportedMime() });
-      S._mediaRecorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
-      S._mediaRecorder.onstop = () => {
-        stream.getTracks().forEach(t => t.stop());
-        const blob = new Blob(chunks, { type: S._mediaRecorder.mimeType });
-        transcribeWhisper(blob);
-      };
-      S._mediaRecorder.start(1000);
-    })
-    .catch(() => { showToast('Mikrofon-Zugriff verweigert'); stopRecording(); });
-}
-
-// ── Anruf-Aufnahme ────────────────────────────────────────────────────────
+// ── Direktaufnahme (Mikrofon, chunked → Whisper) ───────────────────────────
+// Läuft in CALL_CHUNK_MS-Abschnitten, damit auch mehrstündige Aufnahmen
+// (a) Whispers 25MB-Limit pro Request nie erreichen und
+// (b) bei einem Absturz/Tab-Schließen nicht komplett verloren gehen –
+// jeder Abschnitt wird sofort transkribiert und zwischengespeichert.
 async function startCallRecording() {
   try {
     const ctx = new AudioContext();
     S._audioCtx = ctx;
+    if (ctx.state === 'suspended') await ctx.resume();
     const dest = ctx.createMediaStreamDestination();
 
-    // Desktop: System-Audio direkt abgreifen (YouTube, Medien, Anrufe über PC)
-    const isDesktop = !/iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-    if (isDesktop && navigator.mediaDevices.getDisplayMedia) {
-      try {
-        el.recStatus.textContent = 'Audio-Quelle auswählen…';
-        const sysStream = await navigator.mediaDevices.getDisplayMedia({
-          audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
-          video: { width: 1, height: 1 },
-        });
-        sysStream.getVideoTracks().forEach(t => t.stop());
-        S._systemStream = sysStream;
-        if (sysStream.getAudioTracks().length > 0) {
-          const sysSource = ctx.createMediaStreamSource(sysStream);
-          const sysGain = ctx.createGain();
-          sysGain.gain.value = 2.0;
-          sysSource.connect(sysGain);
-          sysGain.connect(dest);
-        }
-      } catch(e) {
-        // Nutzer hat abgebrochen – weiter mit Mikrofon
-      }
-    }
-
-    // Mikrofon: eigene Stimme + akustisches Umgebungsaudio (inkl. Lautsprecher)
     const micStream = await navigator.mediaDevices.getUserMedia({
       audio: {
         echoCancellation: false,
@@ -327,6 +284,7 @@ async function startCallRecording() {
     S._boostedStream = dest.stream;
     S._callTranscript = '';
     S._callChunkNum = 0;
+    S._draftId = null;
     el.recStatus.textContent = 'Aufnahme läuft…';
     startCallChunk();
   } catch(e) {
@@ -362,11 +320,22 @@ function buildMicChain(ctx, stream, dest) {
   const gain = ctx.createGain();
   gain.gain.value = 5.0;
 
+  // Limiter am Ende: deckelt das Signal hart, damit nahe/laute Quellen (eigene
+  // Stimme direkt am Mikro) durch den Boost oben nicht übersteuern/clippen –
+  // während leise/entfernte Quellen (Telefon, Raumgespräch) weiter vom Boost profitieren.
+  const limiter = ctx.createDynamicsCompressor();
+  limiter.threshold.value = -3;
+  limiter.knee.value = 0;
+  limiter.ratio.value = 20;
+  limiter.attack.value = 0.001;
+  limiter.release.value = 0.1;
+
   source.connect(highpass);
   highpass.connect(presence);
   presence.connect(compressor);
   compressor.connect(gain);
-  gain.connect(dest);
+  gain.connect(limiter);
+  limiter.connect(dest);
 }
 
 function startCallChunk() {
@@ -382,9 +351,13 @@ function startCallChunk() {
   recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
 
   recorder.onstop = async () => {
-    if (!chunks.length) return;
+    const isFinal = !S.isRecording;
+    if (!chunks.length) {
+      if (isFinal && S.finalText.trim()) finalize('whisper');
+      return;
+    }
     const blob = new Blob(chunks, { type: recorder.mimeType });
-    await transcribeCallChunk(blob, chunkNum, !S.isRecording);
+    await transcribeCallChunk(blob, chunkNum, isFinal);
   };
 
   recorder.start(1000);
@@ -405,39 +378,77 @@ async function transcribeCallChunk(blob, chunkNum, isFinal = false) {
     el.recStatus.textContent = `Abschnitt ${chunkNum} wird transkribiert…`;
   }
 
+  // Letzte ~200 Zeichen als Kontext mitgeben, damit Whisper an Chunk-Grenzen
+  // Sätze/Namen konsistent fortsetzt statt jeden Abschnitt isoliert zu hören.
+  const context = S._callTranscript.slice(-200);
+  const basePrompt = 'Aufnahme über Mikrofon: eigene Stimme, Telefon auf Lautsprecher oder Gespräch im Raum möglich. Umgangssprache, Dialekt und schnelle Sprache möglich. Wörter vollständig transkribieren.';
+
   const form = new FormData();
   form.append('file', blob, `chunk${chunkNum}.webm`);
   form.append('model', 'whisper-1');
   form.append('language', 'de');
-  form.append('prompt', 'Telefonat auf Lautsprecher. Umgangssprache, Dialekt und schnelle Sprache möglich. Wörter vollständig transkribieren.');
+  form.append('prompt', context ? `${basePrompt} Bisheriger Verlauf: …${context}` : basePrompt);
 
+  const data = await postWhisperChunk(form, key);
+  if (data && data.text && data.text.trim()) {
+    S._callTranscript = (S._callTranscript ? S._callTranscript + ' ' : '') + data.text.trim();
+  } else if (data === null) {
+    // Beide Versuche fehlgeschlagen – Lücke sichtbar markieren statt Text stillschweigend zu verlieren
+    S._callTranscript += ' [Lücke – Abschnitt konnte nicht transkribiert werden] ';
+  }
+  S.finalText = S._callTranscript;
+  el.liveBox.style.display = 'block';
+  el.liveBox.innerHTML = `<span class="final">${esc(S._callTranscript)}</span>`;
+  el.liveBox.scrollTop = el.liveBox.scrollHeight;
+  saveDraft();
+
+  if (S.isRecording) {
+    el.recStatus.textContent = 'Aufnahme läuft…';
+  } else if (isFinal) {
+    el.recStatus.textContent = MODE_META[S.mode].status;
+  }
+
+  if (isFinal) {
+    finalize('whisper');
+  }
+}
+
+// Ein Netzwerkhänger darf bei einer stundenlangen Aufnahme nicht gleich
+// einen Abschnitt kosten – ein automatischer Retry fängt die meisten Fälle ab.
+async function postWhisperChunk(form, key, attempt = 1) {
   try {
     const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}` },
       body: form,
     });
-    const data = await res.json();
-    if (data.text && data.text.trim()) {
-      S._callTranscript = (S._callTranscript ? S._callTranscript + ' ' : '') + data.text.trim();
-      S.finalText = S._callTranscript;
-      el.liveBox.style.display = 'block';
-      el.liveBox.innerHTML = `<span class="final">${esc(S._callTranscript)}</span>`;
-      el.liveBox.scrollTop = el.liveBox.scrollHeight;
-    }
+    if (!res.ok && attempt < 2) return postWhisperChunk(form, key, attempt + 1);
+    return await res.json();
   } catch(e) {
-    // Netzwerkfehler nicht anzeigen – Aufnahme läuft weiter
-  } finally {
-    if (S.isRecording) {
-      el.recStatus.textContent = 'Aufnahme läuft…';
-    } else if (isFinal) {
-      el.recStatus.textContent = MODE_META[S.mode].status;
-    }
+    if (attempt < 2) return postWhisperChunk(form, key, attempt + 1);
+    return null;
   }
+}
 
-  if (isFinal && S.finalText.trim()) {
-    showSaveButton('whisper');
-  }
+// Zwischenspeichern nach jedem Abschnitt, damit bei Absturz/Tab-Schließen
+// während einer mehrstündigen Aufnahme nicht der gesamte Text verloren geht.
+function saveDraft() {
+  if (!S._callTranscript.trim()) return;
+  const idx = S._draftId ? S.transcripts.findIndex(t => t.id === S._draftId) : -1;
+  const entry = idx >= 0 ? S.transcripts[idx] : {
+    id: Date.now(),
+    title: '',
+    date: new Date().toISOString(),
+    mode: S.mode,
+    engine: 'whisper',
+    expanded: false,
+    draft: true,
+  };
+  entry.text = S._callTranscript.trim();
+  entry.duration = S.startTime ? Date.now() - S.startTime : 0;
+  if (idx >= 0) S.transcripts[idx] = entry;
+  else { S._draftId = entry.id; S.transcripts.unshift(entry); }
+  saveTranscriptsStore();
 }
 
 function getSupportedMime() {
@@ -471,7 +482,7 @@ async function transcribeWhisper(blob, filename = 'recording.webm') {
       S.finalText = data.text;
       el.liveBox.style.display = 'block';
       el.liveBox.innerHTML = `<span class="final">${esc(data.text)}</span>`;
-      showSaveButton('whisper');
+      finalize('whisper');
     } else {
       showToast('Keine Sprache erkannt');
     }
@@ -500,35 +511,26 @@ function handleFileUpload(file) {
   el.fileInput.value = '';
 }
 
-// ── Save Button ───────────────────────────────────────────────────────────
-function showSaveButton(engine) {
-  const text = S.finalText.trim();
-  if (!text) { showToast('Keine Sprache erkannt'); return; }
-  S._pendingEngine = engine;
-  el.saveBtn.classList.add('visible');
-}
-
-function manualSave() {
-  finalize(S._pendingEngine || 'webspeech');
-  el.saveBtn.classList.remove('visible');
-}
-
 // ── Finalize transcript ────────────────────────────────────────────────────
 function finalize(engine) {
   const text = S.finalText.trim();
   if (!text) { showToast('Keine Sprache erkannt'); return; }
 
-  const entry = {
+  // War schon ein Draft aus saveDraft() vorhanden (chunked Aufnahme)? Dann übernehmen statt duplizieren.
+  const idx = S._draftId ? S.transcripts.findIndex(t => t.id === S._draftId) : -1;
+  const entry = idx >= 0 ? S.transcripts[idx] : {
     id: Date.now(),
     title: '',
-    text,
     date: new Date().toISOString(),
-    duration: S.startTime ? Date.now() - S.startTime : 0,
     mode: S.mode,
     engine,
     expanded: false,
   };
-  S.transcripts.unshift(entry);
+  entry.text = text;
+  entry.duration = S.startTime ? Date.now() - S.startTime : 0;
+  entry.draft = false;
+  if (idx < 0) S.transcripts.unshift(entry);
+  S._draftId = null;
   saveTranscriptsStore();
   renderTranscripts();
   if (!S.panelOpen) togglePanel();
@@ -695,8 +697,6 @@ function copyAllTranscripts() {
 
 // ── Settings Sheet ─────────────────────────────────────────────────────────
 function openSettings() {
-  el.engToggle.className = 'toggle' + (S.engine === 'whisper' ? ' on' : '');
-  el.keyRow.style.display = S.engine === 'whisper' ? 'block' : 'none';
   el.whisperKeyInput.value = S.whisperKey;
   el.sheetOverlay.classList.add('open');
 }
@@ -713,7 +713,7 @@ function exportBackup() {
   const backup = {
     version: 2,
     date: new Date().toISOString(),
-    settings: { engine: S.engine, whisperKey: S.whisperKey },
+    settings: { whisperKey: S.whisperKey },
     transcripts: S.transcripts,
   };
   const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
@@ -738,7 +738,6 @@ function importBackup(file) {
         return;
       }
       if (backup.settings) {
-        if (backup.settings.engine) S.engine = backup.settings.engine;
         if (backup.settings.whisperKey) S.whisperKey = backup.settings.whisperKey;
         saveSettings();
       }
@@ -785,17 +784,9 @@ function fmtMode(m) {
 function bindEvents() {
   el.modeBtns.forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
   el.micBtnMain.addEventListener('click', toggleRecording);
-  el.saveBtn.addEventListener('click', manualSave);
   el.panelHeader.addEventListener('click', togglePanel);
   el.settingsBtn.addEventListener('click', openSettings);
   el.sheetOverlay.addEventListener('click', e => { if (e.target === el.sheetOverlay) closeSettings(); });
-
-  el.engToggle.addEventListener('click', () => {
-    S.engine = S.engine === 'webspeech' ? 'whisper' : 'webspeech';
-    el.engToggle.className = 'toggle' + (S.engine === 'whisper' ? ' on' : '');
-    el.keyRow.style.display = S.engine === 'whisper' ? 'block' : 'none';
-    checkSupport();
-  });
 
   el.exportBtn.addEventListener('click', exportBackup);
   el.importBtn.addEventListener('click', () => el.importInput.click());
@@ -814,6 +805,9 @@ function bindEvents() {
     S.whisperKey = el.whisperKeyInline.value.trim();
     el.whisperKeyInput.value = el.whisperKeyInline.value;
     saveSettings();
+    checkSupport();
+    el.warnBar.style.display = 'none';
+    if (S.mode !== 'upload') el.whisperBar.style.display = S.whisperKey ? 'none' : 'flex';
   });
 
   // File upload

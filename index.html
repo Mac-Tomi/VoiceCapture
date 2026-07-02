@@ -18,7 +18,7 @@
 
   <!-- Warn bar -->
   <div id="warnBar" class="warn-bar">
-    ⚠ Web Speech API nicht verfügbar – Chrome oder Edge verwenden, oder Whisper in Einstellungen aktivieren.
+    ⚠ Web Speech API nicht verfügbar – Chrome oder Edge verwenden, oder Whisper API Key in Einstellungen eintragen.
   </div>
 
   <!-- Header -->
@@ -36,18 +36,8 @@
     <div class="mode-grid">
       <button class="mode-btn" data-mode="direct">
         <span class="mode-icon"><i class="ti ti-microphone" aria-hidden="true"></i></span>
-        <span class="mode-label">Direkt</span>
-        <span class="mode-desc">Eigene Stimme aufnehmen</span>
-      </button>
-      <button class="mode-btn" data-mode="call">
-        <span class="mode-icon"><i class="ti ti-phone" aria-hidden="true"></i></span>
-        <span class="mode-label">Anruf</span>
-        <span class="mode-desc">Lautsprecher → Mikrofon</span>
-      </button>
-      <button class="mode-btn" data-mode="video">
-        <span class="mode-icon"><i class="ti ti-device-tv" aria-hidden="true"></i></span>
-        <span class="mode-label">Video / Media</span>
-        <span class="mode-desc">Audio vom Gerät aufnehmen</span>
+        <span class="mode-label">Direktaufnahme</span>
+        <span class="mode-desc">Stimme, Telefon, Gespräch im Raum</span>
       </button>
       <button class="mode-btn" data-mode="upload">
         <span class="mode-icon"><i class="ti ti-upload" aria-hidden="true"></i></span>
@@ -91,9 +81,6 @@
 
     <!-- Live transcript -->
     <div class="live-box" id="liveBox" aria-live="polite" aria-label="Live-Transkript"></div>
-    <button class="save-btn" id="saveBtn">
-      <i class="ti ti-device-floppy" aria-hidden="true"></i> Speichern
-    </button>
 
   </div>
 
@@ -135,13 +122,12 @@
 
     <div class="setting-row">
       <div>
-        <div class="setting-label">Whisper API verwenden</div>
-        <div class="setting-sub">Besser für Anrufe & laute Umgebungen</div>
+        <div class="setting-label">Whisper API Key</div>
+        <div class="setting-sub">Mit Key: robuste Aufnahme beliebiger Länge, Telefon & Umgebung. Ohne: nur eigene Stimme live (Browser-Spracherkennung)</div>
       </div>
-      <div class="toggle" id="engToggle" role="switch" aria-checked="false" tabindex="0"></div>
     </div>
 
-    <div id="keyRow" style="display:none; padding: 4px 0 12px;">
+    <div id="keyRow" style="padding: 4px 0 12px;">
       <input class="sheet-input" type="password" id="whisperKeyInput"
         placeholder="OpenAI API Key (sk-…)"
         autocomplete="off" autocorrect="off" spellcheck="false">
